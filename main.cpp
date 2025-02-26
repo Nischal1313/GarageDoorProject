@@ -121,6 +121,8 @@ void irq_handler(uint gpio, uint32_t event_mask) {
 }
 
 void initAll() {
+    stdio_init_all();
+
     gpio_init(IN1);
     gpio_init(IN2);
     gpio_init(IN3);
@@ -241,27 +243,15 @@ public:
 };
 
 class Door {
-private:
-    const int stepperMotorPin;
-    const int limitSwitchPin;
-    const int secondLimitSwitchDown;
-    const int ledPin;
-
 public:
     // Constructor
-    Door(const int stepperMotorPin, const int limitSwitchPin, const int secondLimitSwitchDown,
-         const int ledPin)
-        : stepperMotorPin(stepperMotorPin),
-          limitSwitchPin(limitSwitchPin),
-          secondLimitSwitchDown(secondLimitSwitchDown),
-          ledPin(ledPin){
-    }
+    Door() = default;
 
     void blink() {
         while (true) {
-            gpio_put(ledPin, true);
+            gpio_put(LED_ERROR, true);
             sleep_us(500);
-            gpio_put(ledPin, false);
+            gpio_put(LED_ERROR, false);
             sleep_us(500);
         }
     }
@@ -283,7 +273,7 @@ public:
 
     void updateDoorState() {
         //Static is needed since many function use the same key word when updating the state.
-        static DoorState previousState = DOOR_CLOSED;
+        static DoorState previousState;
 
         if (!ifDoorNotStuck()) {
             blink();
@@ -336,7 +326,7 @@ public:
 
     void moveUntilBottom() {
         int step = 0;
-        while (!gpio_get(secondLimitSwitchDown)) {
+        while (!gpio_get(LIMIT_SWITCH_DOWN)) {
             moveMotorDown(step);
             step = (step + 1) % HALF_STEP_SEQUENCE_LENGTH;
         }
@@ -345,7 +335,7 @@ public:
 
     void moveUntilTop() {
         int step = 0;
-        while (gpio_get(limitSwitchPin)) {
+        while (gpio_get(LIMIT_SWITCH_UP)) {
             moveMotorUp(step);
             step = (step + 1) % HALF_STEP_SEQUENCE_LENGTH;
         }
@@ -355,7 +345,6 @@ public:
 
 
 class GPIOPin {
-
 private:
     int pin; // GPIO pin number
     bool invert; // Whether the pin state is inverted
@@ -444,48 +433,26 @@ void moveUntilTop() {
     }
 }
 
-void fine_adjustment(int step, const int adjustment) {
-    for (int i = 0; i < adjustment; i++) {
-        moveMotorUp(step);
-        step = (step + 1) % HALF_STEP_SEQUENCE_LENGTH;
-    }
-}
-
-void find_falling_edge_for_calibration() {
-    static int step = 0;
-    bool last_state = false;
-    bool current_state = false;
-    while (true) {
-        moveMotorUp(step);
-        step = (step + 1) % HALF_STEP_SEQUENCE_LENGTH;
-        last_state = current_state;
-        current_state = gpio_get(OPTICAL_SENSOR_PIN);
-        if (last_state && !current_state) {
-            printf("Calibrating starting.\n");
-            sleep_ms(1500);
-            //Sleeping helps with getting a more accurate number
-            break;
-        }
-    }
-}
-
 void calibrate() {
-    if (!isCalibrated && !gpio_get(LIMIT_SWITCH_UP)) {
-        moveUntilTop();
-    }
-    if (!isCalibrated) {
-        int step = 0;
-        // Now move down and count steps
-        stepCount = 0; // Reset counter before counting
-        while (gpio_get(LIMIT_SWITCH_DOWN)) {
-            // While bottom switch is NOT pressed
-            moveMotorDown(step);
-            step = (step + 1) % HALF_STEP_SEQUENCE_LENGTH;
-            stepCount++;
+    moveUntilBottom();
+    sleep_ms(1000);
+    while (true) {
+        if (!isCalibrated) {
+            int step = 0;
+            // Now move down and count steps
+            stepCount = 0; // Reset counter before counting
+            while (gpio_get(LIMIT_SWITCH_UP)) {
+                // While bottom switch is NOT pressed
+                moveMotorUp(step+4);
+                doorState = DOOR_OPENING;
+                step = (step + 1) % HALF_STEP_SEQUENCE_LENGTH;
+                stepCount += 4;
+            }
+            doorState = DOOR_OPEN;
+            isCalibrated = true;
+            break;
+            // crowtailEeprom.singleWrite(isCalibrated);
         }
-        doorState = DOOR_CLOSED;
-        isCalibrated = true;
-        // crowtailEeprom.singleWrite(isCalibrated);
     }
 }
 
@@ -508,11 +475,12 @@ void waitingButtonPress() {
     }
 };
 
+Door garageDoor;
+
 int main() {
-    // Door garageDoor(16, 17);
-    stdio_init_all();
     initAll();
-    // moveUntilBottom();
-    waitingButtonPress();
-    return 0;
+    while (true) {
+        waitingButtonPress();
+        garageDoor.updateDoorState();
+    }
 };
