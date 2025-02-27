@@ -139,7 +139,7 @@ GPIOPin LED3(22, false, false, false);
 Motor motor;
 Eeprom eeprom(I2C_PORT, EEPROM_ADDR);
 
-void waitingButtonPress() {
+void waitingCalibration() {
     bool buttons_pressed = false;
     while (buttons_pressed == false && !isCalibrated) {
         if (!sw0.read() || !sw2.read()) {
@@ -153,7 +153,7 @@ void waitingButtonPress() {
 
 int main() {
     initAll();
-    waitingButtonPress();
+    waitingCalibration();
     while (isCalibrated) {
         if (sw1StateChanged) {
             motor.updateMotorState();
