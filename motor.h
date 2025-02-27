@@ -46,10 +46,10 @@ enum DoorDirection {
 class Motor {
 private:
     MotorState currentState = MOTOR_STOPPED;
-    MotorState previousState = MOTOR_STOPPED;
+    MotorState previousState = MOTOR_MOVING_DOWN;
     DoorDirection lastDirection = DOOR_LAST_CLOSING; // Default direction because it will close when calib is finished.
-    int stepCount;
 
+public:
 
     void moveToTop();
 
@@ -59,14 +59,15 @@ private:
 
     void moveDown();
 
+    void moveUp();
+
     void moveToBottom();
 
-public:
     void moveMotorUp();
 
     void moveMotorDown();
 
-    Motor(); // Constructor
+    Motor() = default; // Constructor
     bool isDoorOpen();
 
     bool isDoorClosed();
