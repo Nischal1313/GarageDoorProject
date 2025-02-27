@@ -20,9 +20,6 @@
 #define LIMIT_SWITCH_DOWN 17
 
 
-
-
-
 const uint8_t half_step_sequence[HALF_STEP_SEQUENCE_LENGTH][4] = {
     {1, 0, 0, 0},
     {1, 1, 0, 0},
@@ -34,32 +31,59 @@ const uint8_t half_step_sequence[HALF_STEP_SEQUENCE_LENGTH][4] = {
     {1, 0, 0, 1}
 };
 
-// Enum to represent door states
+enum MotorState {
+    MOTOR_STOPPED,
+    MOTOR_MOVING_UP,
+    MOTOR_MOVING_DOWN
+};
+
+// Define door states to track for SW1 functionality
+enum DoorDirection {
+    DOOR_LAST_OPENING,
+    DOOR_LAST_CLOSING
+};
 
 class Motor {
 private:
+    MotorState currentState = MOTOR_STOPPED;
+    MotorState previousState = MOTOR_STOPPED;
+    DoorDirection lastDirection = DOOR_LAST_CLOSING; // Default direction because it will close when calib is finished.
     int stepCount;
-    bool isCalibrated;
 
-    // Private methods (if any)
-    static void moveMotorUp();
 
-    static void moveMotorDown();
+    void moveToTop();
 
-    static void moveUntilBottom();
+    void moveUntilTop();
 
-    static void moveUntilTop();
+    void moveUntilBottom();
+
+    void moveDown();
+
+    void moveToBottom();
 
 public:
+    void moveMotorUp();
+
+    void moveMotorDown();
+
     Motor(); // Constructor
+    bool isDoorOpen();
+
+    bool isDoorClosed();
 
     // Public methods
     void calibrate();
 
+    // Stop motor
+    static void stop();
+
+    [[nodiscard]] MotorState getState() const;
+
+    // Handle motor movement based on door state
+    void updateMotorState();
+
     // You can also add getters and setters for private variables if needed
     [[nodiscard]] int getStepCount() const;
-
-    [[nodiscard]] bool getIsCalibrated() const;
 };
 
 #endif // MOTOR_H
