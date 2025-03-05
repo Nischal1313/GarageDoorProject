@@ -5,7 +5,11 @@
 #ifndef MOTOR_H
 #define MOTOR_H
 #include <cstdint>
+#include <memory>
 #include <hardware/gpio.h>
+
+#include "eeprom.h"
+#include "encoder.h"
 // Define constants and enums if needed
 #define HALF_STEP_SEQUENCE_LENGTH 8
 #define EEPROM_ADDR 0x50
@@ -45,11 +49,14 @@ enum DoorDirection {
 
 class Motor {
 private:
+    std::shared_ptr<Eeprom> m_Eeprom;
+    std::shared_ptr<Encoder> m_Encoder;
     MotorState currentState = MOTOR_STOPPED;
     MotorState previousState = MOTOR_MOVING_DOWN;
     DoorDirection lastDirection = DOOR_LAST_CLOSING; // Default direction because it will close when calib is finished.
 
 public:
+    explicit Motor(std::shared_ptr<Eeprom> eeprom, std::shared_ptr<Encoder> encoder);
 
     void moveToTop();
 
@@ -74,6 +81,10 @@ public:
 
     // Public methods
     void calibrate();
+
+    void setMinMax();
+
+    void setDoorState();
 
     // Stop motor
     static void stop();

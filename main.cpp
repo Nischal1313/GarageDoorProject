@@ -1,7 +1,4 @@
-#include <cstdio>
-#include <cstring>
 #include <iostream>
-
 #include "pico/stdlib.h"
 #include "pico/time.h"
 #include "hardware/gpio.h"
@@ -11,64 +8,32 @@
 #include "pins.h"
 #include "motor.h"
 #include "eeprom.h"
-
-
-#define ENCODER_A 27
-#define ENCODER_B 28
-#define LIMIT_SWITCH_UP 16
-#define LIMIT_SWITCH_DOWN 17
-#define BUTTON_SW0 9
-#define BUTTON_SW1 8
-#define BUTTON_SW2 7
-#define LED_STATUS 20
-#define EEPROM_ADDR 0x50
-#define CALIBRATION_NUMBER 0x40
-#define MOVING_DOOR 0x80
-#define MOVING_UP_AND_DOWN 0x20
-#define HALF_STEP_SEQUENCE_LENGTH 8
-#define OPTICAL_SENSOR_PIN 28
-#define FINE_ADJUSTMENT_STEPS = 128 // Get an actual value for this.
-#define EEPROM_ADDR 0x50
-#define I2C_PORT i2c0
-#define DEBOUNCE_TIME_MS  100  // Debounce time in milliseconds
-
+#include "defines.h"
+#include "encoder.h"
 
 // Global variables
-bool isCalibrated = false;
-bool doorMoving = false;
-bool doorOpen = false;
-bool errorState = false;
-bool topLimitSwitchHit = false;
-bool bottomLimitSwitchHit = false;
-
 //We need volatile because we never know when these functions might change based on the interrupts.
-volatile bool stopMotor; // Flag to stop motor movement
+volatile bool stopMotor = true; // Flag to stop motor movement. It starts as true since for the first time it will be turned to false.
 volatile bool sw1StateChanged = false;
-volatile int encoderCount = 0;
-volatile uint32_t lastInterruptTime = 0;  // Last time the button was pressed
+volatile bool motorError = false;
+volatile bool isCalibrated  = false;
 
-void irq_handler(uint gpio, uint32_t event_mask) {
-    if (uint32_t currentTime = to_ms_since_boot(get_absolute_time()); currentTime - lastInterruptTime > DEBOUNCE_TIME_MS) {
-        if (isCalibrated) {
-            lastInterruptTime = currentTime;  // Update the last interrupt time
-            sw1StateChanged = true;
-            stopMotor = !stopMotor;
-        }
+const auto encoder = std::make_shared<Encoder>(ENCODER_A, ENCODER_B);
+
+void irq_handler(const uint gpio, uint32_t event_mask) {
+    if (gpio == 8) {
+        stopMotor = !stopMotor;
+        sw1StateChanged = true;
+    } else if (encoder->isEncoderStuck(stopMotor)) {
+        std::cout << "ENCODER STUCK - MOTOR STOPPED" << std::endl;
     }
 }
 
-void rot_handler(uint gpio, uint32_t event_mask) {
-    if (!isCalibrated) {
-        if (gpio_get(ENCODER_A) && gpio_get(ENCODER_B)) {
-            encoderCount++;
-        } else {
-            encoderCount--;
-        }
-    }
-};
-
 void initAll() {
     stdio_init_all();
+
+    gpio_set_irq_enabled_with_callback(BUTTON_SW1, GPIO_IRQ_EDGE_FALL, true, irq_handler);
+    gpio_set_irq_enabled_with_callback(ENCODER_A, GPIO_IRQ_EDGE_FALL, true, irq_handler);
 
     gpio_init(IN1);
     gpio_init(IN2);
@@ -110,9 +75,6 @@ void initAll() {
     gpio_set_dir(LIMIT_SWITCH_DOWN, GPIO_IN);
     gpio_pull_up(LIMIT_SWITCH_DOWN);
 
-    gpio_init(OPTICAL_SENSOR_PIN);
-    gpio_set_dir(OPTICAL_SENSOR_PIN, GPIO_IN);
-    gpio_pull_up(OPTICAL_SENSOR_PIN);
 
     // Initialize encoder pins as inputs
     gpio_init(ENCODER_A);
@@ -123,42 +85,71 @@ void initAll() {
     gpio_set_dir(ENCODER_B, GPIO_IN);
     gpio_pull_up(ENCODER_B);
 
-    gpio_set_irq_enabled_with_callback(BUTTON_SW1, GPIO_IRQ_EDGE_FALL, true, irq_handler);
-    // gpio_set_irq_enabled_with_callback(ENCODER_A, GPIO_IRQ_EDGE_RISE, true, rot_handler);
+
+    i2c_init(I2C_PORT, 100000);
+    gpio_set_function(SDA_PIN, GPIO_FUNC_I2C);
+    gpio_set_function(SCL_PIN, GPIO_FUNC_I2C);
+    gpio_pull_up(SDA_PIN);
+    gpio_pull_up(SCL_PIN);
 }
 
-
+//Buttons
 GPIOPin sw0(BUTTON_SW0);
 GPIOPin sw1(BUTTON_SW1);
 GPIOPin sw2(BUTTON_SW2);
-// Configure LEDs for status indication (GP20 - GP22)
+//LEDs
 GPIOPin LED1(20, false, false, false);
 GPIOPin LED2(21, false, false, false);
 GPIOPin LED3(22, false, false, false);
 
-Motor motor;
-Eeprom eeprom(I2C_PORT, EEPROM_ADDR);
-
-void waitingCalibration() {
+void waitingCalibration(Motor &motor) {
     bool buttons_pressed = false;
     while (buttons_pressed == false && !isCalibrated) {
         if (!sw0.read() || !sw2.read()) {
             buttons_pressed = true;
             motor.calibrate();
             isCalibrated = true;
+            motorError = false;
         }
     }
-};
+}
 
+void ifNotCalibrated(const std::shared_ptr<Eeprom> &eeprom, Motor &motor) {
+    if (eeprom->singleRead(CALIBRATION, false) == false) {
+        std::cout << "not calibrated" << std::endl;
+        std::cout << eeprom->singleRead(STEP_COUNT, true) << std::endl;
+        isCalibrated = false;
+        motorError = false;
+        waitingCalibration(motor);
+    } else {
+        std::cout << "Calibrated" << std::endl;
+        motor.setMinMax();
+        motor.setDoorState();
+        isCalibrated = true;
+    }
+}
 
 int main() {
+    const auto eeprom = std::make_shared<Eeprom>(I2C_PORT, EEPROM_ADDR);
+    Motor motor(eeprom, encoder);
     initAll();
-    waitingCalibration();
-    while (isCalibrated) {
-        if (sw1StateChanged) {
-            motor.updateMotorState();
-            sleep_ms(10);
-            sw1StateChanged = false;
+    // encoder->resetStepCount();
+    // waitingCalibration(motor);
+     while (true) {
+        if (isCalibrated) {
+            if (sw1StateChanged) {
+                motor.updateMotorState();
+                sleep_ms(10);
+                sw1StateChanged = false;
+            } else if (motorError) {
+                eeprom->singleWrite(CALIBRATION, false, false);
+                isCalibrated = false;
+                motorError = false;
+            }
         }
+         if(!isCalibrated) {
+             ifNotCalibrated(eeprom, motor);
+             waitingCalibration(motor);
+         }
     }
 }
