@@ -29,6 +29,20 @@
 #define USE_MQTT
 #define USE_7789
 
+void publishDoorStatus(const char* status) {
+    const char* topic = "garage/door/status";
+    MQTT::Message message;
+    message.qos = MQTT::QOS1;
+    message.retained = false;
+    message.payload = (void*)status;
+    message.payloadlen = strlen(status);
+
+    int rc = client.publish(topic, message);
+    if (rc != 0) {
+        printf("MQTT publish failed, rc=%d\n", rc);
+    }
+}
+
 void messageArrived(MQTT::MessageData &md) {
     MQTT::Message &message = md.message;
 

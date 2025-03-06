@@ -6,6 +6,7 @@
 #include "hardware/gpio.h"
 #include "eeprom.h"
 #include "defines.h"
+#include "mqtt.h"
 
 
 // External variables from main.cpp
@@ -204,22 +205,27 @@ void Motor::updateMotorState() {
         // Door was stopped
         if (isDoorClosed()) {
             // Door is closed → start opening
+            publishDoorStatus("{ \"state\": \"opening\", \"source\": \"motor\" }"); // 🔹 Indicate motor action
             moveUntilTop();
         } else if (isDoorOpen()) {
             // Door is open → start closing
+            publishDoorStatus("{ \"state\": \"closing\", \"source\": \"motor\" }"); // 🔹 Indicate motor action
             moveUntilBottom();
         } else {
             // Door was stopped mid-movement → continue in opposite direction
             if (lastDirection == DOOR_LAST_OPENING) {
                 // Was opening, now close
+                publishDoorStatus("{ \"state\": \"closing\", \"source\": \"motor\" }");
                 moveUntilBottom();
             } else {
                 // Was closing, now open
+                publishDoorStatus("{ \"state\": \"opening\", \"source\": \"motor\" }");
                 moveUntilTop();
             }
         }
     } else if (currentState == MOTOR_MOVING_UP || currentState == MOTOR_MOVING_DOWN) {
         // Door is currently moving → stop it
+        publishDoorStatus("{ \"state\": \"stopped\", \"source\": \"motor\" }"); // 🔹 Indicate motor stopped
         currentState = MOTOR_STOPPED;
         stop();
     }
