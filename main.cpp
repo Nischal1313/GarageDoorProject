@@ -10,6 +10,7 @@
 #include "eeprom.h"
 #include "defines.h"
 #include "encoder.h"
+#include "mqtt.h"
 
 // Global variables
 //We need volatile because we never know when these functions might change based on the interrupts.
@@ -19,6 +20,7 @@ volatile bool motorError = false;
 volatile bool isCalibrated  = false;
 
 const auto encoder = std::make_shared<Encoder>(ENCODER_A, ENCODER_B);
+MQTTManager *mqttManager = nullptr;
 
 void irq_handler(const uint gpio, uint32_t event_mask) {
     if (gpio == 8) {
@@ -26,6 +28,7 @@ void irq_handler(const uint gpio, uint32_t event_mask) {
         sw1StateChanged = true;
     } else if (encoder->isEncoderStuck(stopMotor)) {
         std::cout << "ENCODER STUCK - MOTOR STOPPED" << std::endl;
+        mqttManager->publish("garage/door/status", "{ \"state\": \"stuck\" }"); //Report stuck state
     }
 }
 
@@ -132,6 +135,7 @@ void ifNotCalibrated(const std::shared_ptr<Eeprom> &eeprom, Motor &motor) {
 int main() {
     const auto eeprom = std::make_shared<Eeprom>(I2C_PORT, EEPROM_ADDR);
     Motor motor(eeprom, encoder);
+    mqttManager = new MQTTManager("192.168.209.188", 1883); // Initialize MQTT
     initAll();
     // encoder->resetStepCount();
     // waitingCalibration(motor);

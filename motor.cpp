@@ -9,10 +9,15 @@
 #include "mqtt.h"
 
 
+
 // External variables from main.cpp
 extern volatile bool sw1StateChanged;
 extern volatile bool stopMotor;
 extern volatile bool isCalibrated;
+
+
+extern MQTTManager *mqttManager; // External global MQTTManager instance
+
 
 #define ENCODER_A 27
 #define ENCODER_B 28
@@ -173,6 +178,7 @@ void Motor::calibrate() {
 
     // After calibration, get the number of encoder turns
     isCalibrated = true;
+    publishDoorResponse("{ \"response\": \"command completed\", \"action\": \"gate calibrated\" }"); // Added response message
     std::cout << m_Encoder->getStepCount() << "The encoder count." << std::endl;
     m_Eeprom->singleWrite(STEP_COUNT, stepCount, true);
     m_Eeprom->singleWrite(CALIBRATION, true, false);
@@ -197,42 +203,42 @@ void Motor::updateMotorState() {
         gpio_put(LED_ERROR, false);
         sleep_ms(100);
     }
-    // Save the previous state
+
     previousState = currentState;
 
-    // Determine new state based on current door position and movement
     if (currentState == MOTOR_STOPPED) {
-        // Door was stopped
         if (isDoorClosed()) {
-            // Door is closed → start opening
-            publishDoorStatus("{ \"state\": \"opening\", \"source\": \"motor\" }"); // 🔹 Indicate motor action
+             mqttManager->publish("garage/door/status", "{ \"state\": \"opening\" }"); // Status when the door starts opening
             moveUntilTop();
         } else if (isDoorOpen()) {
-            // Door is open → start closing
-            publishDoorStatus("{ \"state\": \"closing\", \"source\": \"motor\" }"); // 🔹 Indicate motor action
+            mqttManager->publish("garage/door/status", "{ \"state\": \"closing\" }"); // Status when the door starts closing
             moveUntilBottom();
         } else {
-            // Door was stopped mid-movement → continue in opposite direction
             if (lastDirection == DOOR_LAST_OPENING) {
-                // Was opening, now close
-                publishDoorStatus("{ \"state\": \"closing\", \"source\": \"motor\" }");
+                 mqttManager->publish("garage/door/status", "{ \"state\": \"closing\" }");
                 moveUntilBottom();
             } else {
-                // Was closing, now open
-                publishDoorStatus("{ \"state\": \"opening\", \"source\": \"motor\" }");
+                mqttManager->publish("garage/door/status", "{ \"state\": \"opening\" }");
                 moveUntilTop();
             }
         }
     } else if (currentState == MOTOR_MOVING_UP || currentState == MOTOR_MOVING_DOWN) {
-        // Door is currently moving → stop it
-        publishDoorStatus("{ \"state\": \"stopped\", \"source\": \"motor\" }"); // 🔹 Indicate motor stopped
+        mqttManager->publish("garage/door/status", "{ \"state\": \"stopped\" }"); // Status when the door stops
         currentState = MOTOR_STOPPED;
         stop();
     }
-    std::cout << m_Encoder-> getStepCount() << " The encoder count." << std::endl;
+
+    // ✅ If the encoder detects no movement, report that the door is stuck
+    if (m_Encoder->encoderStuck()) {
+        mqttManager->publish("garage/door/status", "{ \"state\": \"stuck\" }"); // Reports that the gate is stuck!
+    }
+
+    std::cout << m_Encoder->getStepCount() << " The encoder count." << std::endl;
+
     m_Eeprom->singleWrite(DOOR_STATE, currentState, false);
     m_Eeprom->singleWrite(MOVING_UP_AND_DOWN, lastDirection, false);
 }
+
 
 // Getter methods
 int Motor::getStepCount() const {

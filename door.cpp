@@ -6,6 +6,10 @@
 #include "mqtt.h"
 #include <pico/time.h>
 #include "hardware/gpio.h"
+#include "mqtt.h"
+
+extern MQTTManager *mqttManager;  // External global MQTTManager instance
+
 
 
 // Blink function to indicate an error state using an LED
@@ -29,46 +33,46 @@ void Door::updateDoorState() {
 
         switch (doorState) {
             case DOOR_CLOSED:
-                // If the door is closed, pressing SW1 will start opening it
                 doorState = DOOR_OPENING;
-                publishDoorStatus("{ \"state\": \"opening\", \"source\": \"button_press\" }"); // 🔹 Indicate SW1 was pressed
-                stopMotor = false;  // Clear the stop flag
-                break;
+           mqttManager->publish("garage/door/status", "{ \"state\": \"opening\" }"); // Status update
+            stopMotor = false;
+            break;
 
             case DOOR_OPEN:
-                // If the door is open, pressing SW1 will start closing it
                 doorState = DOOR_CLOSING;
-                publishDoorStatus("{ \"state\": \"closing\", \"source\": \"button_press\" }"); // 🔹 Indicate SW1 was pressed
-                stopMotor = false;
-                break;
+           mqttManager->publish("garage/door/status", "{ \"state\": \"closing\" }"); // Status update
+            stopMotor = false;
+            break;
 
             case DOOR_CLOSING:
-                // If the door is currently closing, pressing SW1 will stop it
                 doorState = DOOR_STOPPED;
-                publishDoorStatus("{ \"state\": \"stopped\", \"source\": \"button_press\" }"); // 🔹 Indicate SW1 stopped movement
-                break;
+             mqttManager->publish("garage/door/status", "{ \"state\": \"stopped\" }");  // Status Update
+                mqttManager->publish("garage/door/response", "{ \"response\": \"command completed\", \"action\": \"gate stopped\" }") // Response when stopping
+            break;
 
             case DOOR_STOPPED:
-                // If the door was stopped mid-movement, pressing SW1 resumes movement in the opposite direction
                 if (previousState == DOOR_OPENING) {
-                    // If the door was opening before stopping, resume closing
                     doorState = DOOR_CLOSING;
-                    publishDoorStatus("{ \"state\": \"closing\", \"source\": \"button_press\" }");
+                    mqttManager->publish("garage/door/status", "{ \"state\": \"closing\" }");
                     stopMotor = false;
                 } else if (previousState == DOOR_CLOSING) {
-                    // If the door was closing before stopping, resume opening
                     doorState = DOOR_OPENING;
-                    publishDoorStatus("{ \"state\": \"opening\", \"source\": \"button_press\" }");
+                    mqttManager->publish("garage/door/status", "{ \"state\": \"opening\" }");
                     stopMotor = false;
                 }
-                break;
+            break;
 
             default:
-                // No changes if no valid state is found
                 break;
         }
 
-        // Save the previous movement state for use when restarting from DOOR_STOPPED
+        // Publish a response when the action is **fully completed**
+        if (doorState == DOOR_CLOSED) {
+            mqttManager->publish("garage/door/response", "{ \"response\": \"command completed\", \"action\": \"gate closed\" }");
+        } else if (doorState == DOOR_OPEN) {
+             mqttManager->publish("garage/door/response", "{ \"response\": \"command completed\", \"action\": \"gate opened\" }");
+        }
+
         if (doorState == DOOR_OPENING || doorState == DOOR_CLOSING) {
             previousState = doorState;
         }

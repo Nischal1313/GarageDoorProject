@@ -1,144 +1,131 @@
+#include "mqtt.h"
 #include <stdio.h>
 #include <string.h>
-#include <cmath>
 #include "pico/stdlib.h"
 #include "pico/time.h"
 #include "hardware/timer.h"
-#include "uart/PicoUart.h"
-
 #include "IPStack.h"
-#include "Countdown.h"
 #include "MQTTClient.h"
 
-// We are using pins 0 and 1, but see the GPIO function select table in the
-// datasheet for information on which other pins can be used.
-#if 0
-#define UART_NR 0
-#define UART_TX_PIN 0
-#define UART_RX_PIN 1
-#else
-#define UART_NR 1
-#define UART_TX_PIN 4
-#define UART_RX_PIN 5
-#endif
+#define MQTT_BROKER "192.168.209.188"
+#define MQTT_PORT 1883
 
-#define BAUD_RATE 9600
-#define STOP_BITS 1 // for simulator
-//#define STOP_BITS 2 // for real system
+// Global instance
+MQTTManager *mqttManager = nullptr;
 
-#define USE_MQTT
-#define USE_7789
-
-void publishDoorStatus(const char* status) {
-    const char* topic = "garage/door/status";
-    MQTT::Message message;
-    message.qos = MQTT::QOS1;
-    message.retained = false;
-    message.payload = (void*)status;
-    message.payloadlen = strlen(status);
-
-    int rc = client.publish(topic, message);
-    if (rc != 0) {
-        printf("MQTT publish failed, rc=%d\n", rc);
-    }
+// Constructor
+MQTTManager::MQTTManager(const char *broker, int port) : hostname(broker), port(port) {
+    ipstack = new IPStack("TGalaxy S20 FE", "poliuyt12"); // Network credentials
+    client = new MQTT::Client<IPStack, Countdown>(*ipstack);
 }
 
-void messageArrived(MQTT::MessageData &md) {
-    MQTT::Message &message = md.message;
-
-    char payload[message.payloadlen + 1];
-    memcpy(payload, message.payload, message.payloadlen);
-    payload[message.payloadlen] = '\0';  // Null-terminate
-
-    printf("Received MQTT Command: %s\n", payload);
-
-    if (strcmp(payload, "led_on") == 0) {
-        printf("Turning LED ON\n");
-        gpio_put(22, true);
-    }
-    else if (strcmp(payload, "led_off") == 0) {
-        printf("Turning LED OFF\n");
-        gpio_put(22, false);
-    }
-    else if (strcmp(payload, "blink") == 0) {
-        printf("Blinking LED 3 times\n");
-        for (int i = 0; i < 3; i++) {
-            gpio_put(22, true);
-            sleep_ms(500);
-            gpio_put(22, false);
-            sleep_ms(500);
-        }
-    }
-    else {
-        printf("Unknown Command: %s\n", payload);
-    }
+// Destructor
+MQTTManager::~MQTTManager() {
+    delete client;
+    delete ipstack;
 }
 
-const char * hostname = "192.168.209.188"; // Broker IP
-
-int main() {
-
-    const uint led_pin = 22;
-    const uint button = 9;
-
-    // Initialize LED pin
-    gpio_init(led_pin);
-    gpio_set_dir(led_pin, GPIO_OUT);
-
-    gpio_init(button);
-    gpio_set_dir(button, GPIO_IN);
-    gpio_pull_up(button);
-
-    // Initialize chosen serial port
-    stdio_init_all();
-
-    printf("\nBoot\n");
-
-#ifdef USE_MQTT
-    const char *topic = "test-topic";
-    IPStack ipstack("TGalaxy S20 FE", "poliuyt12");
-    auto client = MQTT::Client<IPStack, Countdown>(ipstack);
-
-    int rc = ipstack.connect(hostname, 1883);
+// Connect to MQTT broker
+bool MQTTManager::connect() {
+    int rc = ipstack->connect(hostname, port);
     if (rc != 1) {
-        printf("rc from TCP connect is %d\n", rc);
+        printf("Failed to connect to broker, rc=%d\n", rc);
+        return false;
     }
 
     printf("MQTT connecting\n");
     MQTTPacket_connectData data = MQTTPacket_connectData_initializer;
     data.MQTTVersion = 3;
-    data.clientID.cstring = (char *) "PicoW-sample";
+    data.clientID.cstring = (char *)"PicoW-sample";
 
-    rc = client.connect(data);
+    rc = client->connect(data);
     if (rc != 0) {
-        printf("rc from MQTT connect is %d\n", rc);
+        printf("MQTT connection failed, rc=%d\n", rc);
+        return false;
+    }
+
+    printf("MQTT connected!\n");
+    return true;
+}
+
+// Subscribe to a topic
+void MQTTManager::subscribe(const char *topic) {
+    int rc = client->subscribe(topic, MQTT::QOS2, messageArrived);
+    if (rc != 0) {
+        printf("Failed to subscribe to topic: %s, rc=%d\n", topic, rc);
+    } else {
+        printf("Subscribed to topic: %s\n", topic);
+    }
+}
+
+// Publish a message
+void MQTTManager::publish(const char *topic, const char *message) {
+    MQTT::Message mqttMessage;
+    mqttMessage.qos = MQTT::QOS1;
+    mqttMessage.retained = false;
+    mqttMessage.payload = (void *)message;
+    mqttMessage.payloadlen = strlen(message);
+
+    int rc = client->publish(topic, mqttMessage);
+    if (rc != 0) {
+        printf("MQTT publish failed for topic: %s, rc=%d\n", topic, rc);
+    }
+}
+
+// Handle incoming MQTT messages
+void MQTTManager::messageArrived(MQTT::MessageData &md) {
+    MQTT::Message &message = md.message;
+    char payload[message.payloadlen + 1];
+    memcpy(payload, message.payload, message.payloadlen);
+    payload[message.payloadlen] = '\0';
+
+    printf("Received MQTT Command: %s\n", payload);
+
+    if (strcmp(payload, "open") == 0) {
+        printf("MQTT Command: OPENING DOOR\n");
+        mqttManager->publish("garage/door/response", "{ \"response\": \"command received\", \"action\": \"open\" }");
+        sw1StateChanged = true;
+        stopMotor = false;
+    } else if (strcmp(payload, "close") == 0) {
+        printf("MQTT Command: CLOSING DOOR\n");
+        mqttManager->publish("garage/door/response", "{ \"response\": \"command received\", \"action\": \"close\" }");
+        sw1StateChanged = true;
+        stopMotor = false;
+    } else if (strcmp(payload, "stop") == 0) {
+        printf("MQTT Command: STOPPING DOOR\n");
+        mqttManager->publish("garage/door/response", "{ \"response\": \"command received\", \"action\": \"stop\" }");
+        stopMotor = true;
+    } else if (strcmp(payload, "calibrate") == 0) {
+        printf("MQTT Command: CALIBRATING DOOR\n");
+        mqttManager->publish("garage/door/response", "{ \"response\": \"command received\", \"action\": \"calibrate\" }");
+        isCalibrated = false;
+        waitingCalibration();
+    } else {
+        printf("Unknown Command: %s\n", payload);
+    }
+}
+
+// Main function
+int main() {
+    stdio_init_all();
+
+    mqttManager = new MQTTManager(MQTT_BROKER, MQTT_PORT);
+    if (!mqttManager->connect()) {
         while (true) {
-            tight_loop_contents();
+            printf("MQTT connection failed, retrying...\n");
+            sleep_ms(5000);
+            mqttManager->connect();
         }
     }
-    printf("MQTT connected\n");
 
-    // Subscribe to topic
-    rc = client.subscribe(topic, MQTT::QOS2, messageArrived);
-    if (rc != 0) {
-        printf("rc from MQTT subscribe is %d\n", rc);
-    }
-    printf("MQTT subscribed\n");
-
-#endif
+    mqttManager->subscribe("garage/door/command");
 
     while (true) {
-#ifdef USE_MQTT
-        if (!client.isConnected()) {
-            printf("Not connected...\n");
-            rc = client.connect(data);
-            if (rc != 0) {
-                printf("rc from MQTT connect is %d\n", rc);
-            }
+        if (!mqttManager->connect()) {
+            printf("MQTT disconnected, reconnecting...\n");
+            mqttManager->connect();
         }
 
-        client.yield(100); // Process MQTT messages
-#endif
-        tight_loop_contents();
+        sleep_ms(100);
     }
 }
