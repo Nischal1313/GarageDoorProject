@@ -6,6 +6,7 @@
 
 #include "hardware/i2c.h"
 
+
 class Eeprom {
 private:
     i2c_inst_t *i2cPort; // I2C port instance
@@ -16,10 +17,10 @@ public:
     Eeprom(i2c_inst_t *i2cPort, uint8_t eepromAddr);
 
     // Read a single byte from EEPROM
-    [[nodiscard]] int singleRead(int addr) const;
+    [[nodiscard]] int singleRead(int addr, bool largerBit) const;
 
     // Write a single byte dynamically (only writes if data is different)
-    void singleWrite(int addr, int data) const;
+    void singleWrite(int addr, int data, bool largerBit) const;
 };
 
 #endif // EEPROM_H
