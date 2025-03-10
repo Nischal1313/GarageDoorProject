@@ -49,6 +49,7 @@ void Motor::setMinMax() {
 void Motor::setDoorState() {
     currentState = static_cast<MotorState>(m_Eeprom->singleRead(DOOR_STATE, false));
     lastDirection = static_cast<DoorDirection>(m_Eeprom->singleRead(MOVING_UP_AND_DOWN, false));
+    currentState = MOTOR_STOPPED;
     std::cout << "current-state " << currentState << std::endl;
     std::cout << "last-dir " << lastDirection << std::endl;
 }
